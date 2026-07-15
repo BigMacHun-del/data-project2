@@ -10,6 +10,7 @@
 # 0.1 : 2026년 7월 15일 - 최초 작성
 # 0.2 : 2026년 7월 15일 - Weather Pydantic 스키마 및 CSV 저장/로딩 추가
 # 0.3 : 2026년 7월 15일 - Weather Parquet 저장 및 부분 컬럼(도시, 기온) 읽기 추가
+# 0.4 : 2026년 7월 15일 - Ruff 적용하여 정리
 # --------------
 
 """
@@ -55,7 +56,9 @@ class Weather(BaseModel):
     현지시각: str
 
 
-async def fetch_weather(client: httpx.AsyncClient, city: dict[str, Any]) -> dict[str, Any]:
+async def fetch_weather(
+    client: httpx.AsyncClient, city: dict[str, Any]
+) -> dict[str, Any]:
     """open-meteo에서 현재 날씨(기온 등)를 가져온다."""
     params = {
         "latitude": city["lat"],
@@ -65,7 +68,12 @@ async def fetch_weather(client: httpx.AsyncClient, city: dict[str, Any]) -> dict
     try:
         resp = await client.get(WEATHER_URL, params=params, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
-        return {"city": city["name"], "source": "weather", "ok": True, "data": resp.json()}
+        return {
+            "city": city["name"],
+            "source": "weather",
+            "ok": True,
+            "data": resp.json(),
+        }
     except httpx.HTTPError as e:
         return {"city": city["name"], "source": "weather", "ok": False, "error": str(e)}
 
@@ -93,9 +101,14 @@ async def collect_all(cities: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return results
 
 
-def merge_by_city(raw_results: list[dict[str, Any]], cities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def merge_by_city(
+    raw_results: list[dict[str, Any]], cities: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """도시별로 weather/time 결과를 하나의 레코드로 병합한다."""
-    by_city: dict[str, dict[str, Any]] = {c["name"]: {"city": c["name"], "lat": c["lat"], "lon": c["lon"], "tz": c["tz"]} for c in cities}
+    by_city: dict[str, dict[str, Any]] = {
+        c["name"]: {"city": c["name"], "lat": c["lat"], "lon": c["lon"], "tz": c["tz"]}
+        for c in cities
+    }
 
     for r in raw_results:
         city_name = r["city"]
@@ -140,7 +153,9 @@ def build_weather_list(merged: list[dict[str, Any]]) -> list[Weather]:
         local_time = format_local_time(row.get("datetime"))
 
         try:
-            weathers.append(Weather(도시=row["city"], 기온=temperature, 현지시각=local_time))
+            weathers.append(
+                Weather(도시=row["city"], 기온=temperature, 현지시각=local_time)
+            )
         except ValidationError as e:
             print(f"[스키마 검증 실패] {row.get('city')}: {e}")
 
