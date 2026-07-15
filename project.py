@@ -14,6 +14,7 @@
 # 0.5 : 2026년 7월 15일 - CSV/Parquet 저장·읽기 성능 측정 및 비교 추가
 # 0.6 : 2026년 7월 15일 - 함수별 설명 주석 보강, 예외 처리 보강
 # 0.7 : 2026년 7월 15일 - 불필요한 print() 전부 logging으로 전환
+# 0.8 : 2026년 7월 15일 - test_project.py를 이 파일로 병합
 # --------------
 
 """
@@ -72,7 +73,7 @@ class Weather(BaseModel):
 async def fetch_weather(
     client: httpx.AsyncClient, city: dict[str, Any]
 ) -> dict[str, Any]:
-    #open-meteo에서 현재 날씨(기온 등)를 가져옴
+    # open-meteo에서 현재 날씨(기온 등)를 가져옴
     params = {
         "latitude": city["lat"],
         "longitude": city["lon"],
@@ -101,7 +102,7 @@ async def fetch_weather(
 
 
 async def fetch_time(client: httpx.AsyncClient, city: dict[str, Any]) -> dict[str, Any]:
-    #timeapi.io에서 타임존 기준 현재 시간을 가져옴
+    # timeapi.io에서 타임존 기준 현재 시간을 가져옴
     params = {"timeZone": city["tz"]}
     try:
         resp = await client.get(TIME_URL, params=params, timeout=REQUEST_TIMEOUT)
@@ -119,7 +120,7 @@ async def fetch_time(client: httpx.AsyncClient, city: dict[str, Any]) -> dict[st
 
 
 async def collect_all(cities: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    #모든 도시의 날씨 + 시간 정보를 동시에(concurrent) 수집
+    # 모든 도시의 날씨 + 시간 정보를 동시에(concurrent) 수집
     async with httpx.AsyncClient() as client:
         tasks = []
         for city in cities:
@@ -171,7 +172,7 @@ def merge_by_city(
 
 
 def format_local_time(iso_str: str | None) -> str:
-    #timeapi.io의 ISO 형식 dateTime을 'MM/DD/YYYY HH:MM' 형식으로 변환
+    # timeapi.io의 ISO 형식 dateTime을 'MM/DD/YYYY HH:MM' 형식으로 변환
     if not iso_str:
         return "정보없음"
     try:
@@ -183,7 +184,7 @@ def format_local_time(iso_str: str | None) -> str:
 
 
 def build_weather_list(merged: list[dict[str, Any]]) -> list[Weather]:
-    #병합된 원시 데이터를 Weather 스키마 객체 리스트로 변환
+    # 병합된 원시 데이터를 Weather 스키마 객체 리스트로 변환
     weathers: list[Weather] = []
     for row in merged:
         temperature = row.get("temperature")
@@ -209,7 +210,7 @@ def build_weather_list(merged: list[dict[str, Any]]) -> list[Weather]:
 
 
 def save_weather_csv(weathers: list[Weather], path: Path = CSV_PATH) -> None:
-    #Weather 객체 리스트를 CSV로 저장
+    # Weather 객체 리스트를 CSV로 저장
     df = pd.DataFrame([w.model_dump() for w in weathers])
     try:
         df.to_csv(path, index=False, encoding="utf-8-sig")
@@ -237,7 +238,7 @@ def load_weather_csv(path: Path = CSV_PATH) -> pd.DataFrame:
 
 
 def save_weather_parquet(weathers: list[Weather], path: Path = PARQUET_PATH) -> None:
-    #Weather 객체 리스트를 Parquet으로 저장한다.
+    # Weather 객체 리스트를 Parquet으로 저장한다.
     df = pd.DataFrame([w.model_dump() for w in weathers])
     try:
         df.to_parquet(path, index=False)
@@ -263,8 +264,29 @@ def load_weather_parquet(
         raise ValueError(f"Parquet 파일을 읽을 수 없습니다: {path} ({e})") from e
 
 
+SEOUL = next(city for city in CITIES if city["name"] == "서울")
+
+
+def test_seoul_temperature_is_25() -> None:
+    """서울의 현재 기온이 25도인지 검사한다. 아니면 Fail 메시지를 출력한다."""
+
+    async def _fetch() -> dict[str, Any]:
+        async with httpx.AsyncClient() as client:
+            return await fetch_weather(client, SEOUL)
+
+    result = asyncio.run(_fetch())
+
+    assert result["ok"], f"[FAIL] 서울 날씨 API 호출 실패: {result.get('error')}"
+
+    temperature = result["data"]["current_weather"]["temperature"]
+
+    assert temperature == 25, (
+        f"[FAIL] 서울 현재 기온이 25도가 아닙니다. 실제 값: {temperature}도"
+    )
+
+
 def measure(func: Any, *args: Any, **kwargs: Any) -> tuple[Any, float]:
-    #임의 함수를 실행하고 결과, 소요시간을 반환
+    # 임의 함수를 실행하고 결과, 소요시간을 반환
     start = time.perf_counter()
     result = func(*args, **kwargs)
     elapsed = time.perf_counter() - start
@@ -272,7 +294,7 @@ def measure(func: Any, *args: Any, **kwargs: Any) -> tuple[Any, float]:
 
 
 def compare_storage_performance(weathers: list[Weather]) -> dict[str, float]:
-    #CSV/Parquet 저장(쓰기) 및 재로딩(읽기) 시간을 측정하고 비교
+    # CSV/Parquet 저장(쓰기) 및 재로딩(읽기) 시간을 측정하고 비교
     timings: dict[str, float | None] = {
         "csv_write": None,
         "csv_read": None,
@@ -322,7 +344,7 @@ def compare_storage_performance(weathers: list[Weather]) -> dict[str, float]:
 
 
 async def main() -> list[dict[str, Any]]:
-    #전체 파이프라인 실행: 수집 -> 스키마 검증 -> CSV/Parquet 저장·재로딩 -> 성능 비교.
+    # 전체 파이프라인 실행: 수집 -> 스키마 검증 -> CSV/Parquet 저장·재로딩 -> 성능 비교.
     start = time.perf_counter()
     raw_results = await collect_all(CITIES)
     elapsed = time.perf_counter() - start
