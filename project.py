@@ -11,6 +11,7 @@
 # 0.2 : 2026년 7월 15일 - Weather Pydantic 스키마 및 CSV 저장/로딩 추가
 # 0.3 : 2026년 7월 15일 - Weather Parquet 저장 및 부분 컬럼(도시, 기온) 읽기 추가
 # 0.4 : 2026년 7월 15일 - Ruff 적용하여 정리
+# 0.5 : 2026년 7월 15일 - CSV/Parquet 저장·읽기 성능 측정 및 비교 추가
 # --------------
 
 """
@@ -193,6 +194,39 @@ def load_weather_parquet(
     return pd.read_parquet(path, columns=columns)
 
 
+def measure(func: Any, *args: Any, **kwargs: Any) -> tuple[Any, float]:
+    """임의 함수를 실행하고 (결과, 소요시간(초))를 반환한다."""
+    start = time.perf_counter()
+    result = func(*args, **kwargs)
+    elapsed = time.perf_counter() - start
+    return result, elapsed
+
+
+def compare_storage_performance(weathers: list[Weather]) -> dict[str, float]:
+    """CSV/Parquet 저장(쓰기) 및 재로딩(읽기) 시간을 측정하고 비교한다."""
+    timings: dict[str, float] = {}
+
+    _, timings["csv_write"] = measure(save_weather_csv, weathers)
+    _, timings["csv_read"] = measure(load_weather_csv)
+
+    _, timings["parquet_write"] = measure(save_weather_parquet, weathers)
+    _, timings["parquet_read"] = measure(load_weather_parquet)
+
+    print("\n[CSV vs Parquet 저장/읽기 성능 비교]")
+    print(f"{'항목':<10}{'CSV(초)':>8}{'Parquet(초)':>14}")
+    print(f"{'쓰기':<10}{timings['csv_write']:>8.6f}{timings['parquet_write']:>14.6f}")
+    print(f"{'읽기':<10}{timings['csv_read']:>8.6f}{timings['parquet_read']:>14.6f}")
+
+    faster_write = (
+        "CSV" if timings["csv_write"] < timings["parquet_write"] else "Parquet"
+    )
+    faster_read = "CSV" if timings["csv_read"] < timings["parquet_read"] else "Parquet"
+    print(f"\n쓰기 더 빠른 포맷 : {faster_write}")
+    print(f"읽기 더 빠른 포맷 : {faster_read}")
+
+    return timings
+
+
 async def main() -> list[dict[str, Any]]:
     start = time.perf_counter()
     raw_results = await collect_all(CITIES)
@@ -222,6 +256,8 @@ async def main() -> list[dict[str, Any]]:
         print(df_parquet)
     except FileNotFoundError as e:
         print(f"[오류] {e}")
+
+    compare_storage_performance(weathers)
 
     return merged
 
