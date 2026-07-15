@@ -9,6 +9,7 @@
 # 변경사항 내역
 # 0.1 : 2026년 7월 15일 - 최초 작성
 # 0.2 : 2026년 7월 15일 - Weather Pydantic 스키마 및 CSV 저장/로딩 추가
+# 0.3 : 2026년 7월 15일 - Weather Parquet 저장 및 부분 컬럼(도시, 기온) 읽기 추가
 # --------------
 
 """
@@ -43,6 +44,7 @@ TIME_URL = "https://timeapi.io/api/time/current/zone"
 REQUEST_TIMEOUT = 10.0
 
 CSV_PATH = Path("weather.csv")
+PARQUET_PATH = Path("weather.parquet")
 
 
 class Weather(BaseModel):
@@ -159,6 +161,23 @@ def load_weather_csv(path: Path = CSV_PATH) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+def save_weather_parquet(weathers: list[Weather], path: Path = PARQUET_PATH) -> None:
+    """Weather 객체 리스트를 Parquet으로 저장한다."""
+    df = pd.DataFrame([w.model_dump() for w in weathers])
+    df.to_parquet(path, index=False)
+    print(f"[Parquet 저장 완료] {path} ({len(df)}건)")
+
+
+def load_weather_parquet(
+    path: Path = PARQUET_PATH, columns: list[str] | None = None
+) -> pd.DataFrame:
+    """Parquet을 읽어온다. columns를 지정하면 해당 컬럼만 읽는다.
+    파일이 존재하지 않으면 예외를 발생시킨다."""
+    if not path.exists():
+        raise FileNotFoundError(f"Parquet 파일이 존재하지 않습니다: {path}")
+    return pd.read_parquet(path, columns=columns)
+
+
 async def main() -> list[dict[str, Any]]:
     start = time.perf_counter()
     raw_results = await collect_all(CITIES)
@@ -177,6 +196,15 @@ async def main() -> list[dict[str, Any]]:
         df = load_weather_csv()
         print("\n[CSV 재로딩 결과]")
         print(df)
+    except FileNotFoundError as e:
+        print(f"[오류] {e}")
+
+    save_weather_parquet(weathers)
+
+    try:
+        df_parquet = load_weather_parquet(columns=["도시", "기온"])
+        print("\n[Parquet 재로딩 결과 - 도시/기온만]")
+        print(df_parquet)
     except FileNotFoundError as e:
         print(f"[오류] {e}")
 
