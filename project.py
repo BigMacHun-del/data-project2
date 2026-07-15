@@ -8,12 +8,7 @@
 #
 # 변경사항 내역
 # 0.1 : 2026년 7월 15일 - 최초 작성
-#         - CITIES(서울/도쿄/뉴욕/런던) 정의
-#         - fetch_weather(), fetch_time() 비동기 호출 함수 작성
-#         - collect_all()에서 asyncio.gather()로 도시 x API 요청 동시 실행
-#         - merge_by_city()로 도시별 weather/time 결과 병합
-#         - 개별 요청 실패 시 예외를 잡아 ok:False로 반환(파이프라인 중단 방지)
-#         - main()에서 실행 시간 측정 및 결과 출력
+# 0.2 : 2026년 7월 15일 - Weather Pydantic 스키마 및 CSV 저장/로딩 추가
 # --------------
 
 """
@@ -27,9 +22,13 @@ asyncio.gather()로 도시별 API 호출을 동시에 실행한다.
 
 import asyncio
 import time
-from typing import Any
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Union
 
 import httpx
+import pandas as pd
+from pydantic import BaseModel, ValidationError
 
 CITIES: list[dict[str, Any]] = [
     {"name": "서울", "lat": 37.5665, "lon": 126.9780, "tz": "Asia/Seoul"},
@@ -42,6 +41,16 @@ WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 TIME_URL = "https://timeapi.io/api/time/current/zone"
 
 REQUEST_TIMEOUT = 10.0
+
+CSV_PATH = Path("weather.csv")
+
+
+class Weather(BaseModel):
+    """도시별 현재기온·현지시각 요약 스키마."""
+
+    도시: str
+    기온: Union[float, str]
+    현지시각: str
 
 
 async def fetch_weather(client: httpx.AsyncClient, city: dict[str, Any]) -> dict[str, Any]:
@@ -107,6 +116,49 @@ def merge_by_city(raw_results: list[dict[str, Any]], cities: list[dict[str, Any]
     return list(by_city.values())
 
 
+def format_local_time(iso_str: str | None) -> str:
+    """timeapi.io의 ISO 형식 dateTime을 'MM/DD/YYYY HH:MM' 형식으로 변환한다."""
+    if not iso_str:
+        return "정보없음"
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        return dt.strftime("%m/%d/%Y %H:%M")
+    except ValueError:
+        return iso_str
+
+
+def build_weather_list(merged: list[dict[str, Any]]) -> list[Weather]:
+    """병합된 원시 데이터를 Weather 스키마 객체 리스트로 변환한다."""
+    weathers: list[Weather] = []
+    for row in merged:
+        temperature = row.get("temperature")
+        if temperature is None:
+            temperature = row.get("weather_error", "정보없음")
+
+        local_time = format_local_time(row.get("datetime"))
+
+        try:
+            weathers.append(Weather(도시=row["city"], 기온=temperature, 현지시각=local_time))
+        except ValidationError as e:
+            print(f"[스키마 검증 실패] {row.get('city')}: {e}")
+
+    return weathers
+
+
+def save_weather_csv(weathers: list[Weather], path: Path = CSV_PATH) -> None:
+    """Weather 객체 리스트를 CSV로 저장한다."""
+    df = pd.DataFrame([w.model_dump() for w in weathers])
+    df.to_csv(path, index=False, encoding="utf-8-sig")
+    print(f"[CSV 저장 완료] {path} ({len(df)}건)")
+
+
+def load_weather_csv(path: Path = CSV_PATH) -> pd.DataFrame:
+    """CSV를 읽어온다. 파일이 존재하지 않으면 예외를 발생시킨다."""
+    if not path.exists():
+        raise FileNotFoundError(f"CSV 파일이 존재하지 않습니다: {path}")
+    return pd.read_csv(path)
+
+
 async def main() -> list[dict[str, Any]]:
     start = time.perf_counter()
     raw_results = await collect_all(CITIES)
@@ -117,6 +169,16 @@ async def main() -> list[dict[str, Any]]:
     print(f"[비동기 수집 완료] 총 {len(raw_results)}개 요청, {elapsed:.2f}초 소요\n")
     for row in merged:
         print(row)
+
+    weathers = build_weather_list(merged)
+    save_weather_csv(weathers)
+
+    try:
+        df = load_weather_csv()
+        print("\n[CSV 재로딩 결과]")
+        print(df)
+    except FileNotFoundError as e:
+        print(f"[오류] {e}")
 
     return merged
 
